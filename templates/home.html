@@ -1,0 +1,581 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block active %}
+    {% with active='home' %}{{ block.super }}{% endwith %}
+{% endblock %}
+
+
+{% block title %}
+    <title>The Beatles | Home</title>
+{% endblock %}
+
+{% block content %}
+<div class="search-container d-flex align-items-center justify-content-center p-3 bg-light rounded-3 shadow-sm mx-auto my-3" style="border-radius:2.3rem !important;border: 0.5px solid #ced4da;">
+    <!-- Add a label for the input field -->
+    <label for="autocomplete" class="visually-hidden">Search for Nearest Restrooms</label>
+    <input type="text" class="form-control me-2 pac-target-input" placeholder="Find Nearest Restrooms" id="autocomplete" list="history-list" autocomplete="off">
+    <datalist id="history-list">
+      <!-- Search history options will be populated here -->
+    </datalist>
+    <button class="btn" style="background-color:#2c3e50;color:White;border-radius:20px;" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
+</div>
+
+<!-- Filter Modal -->
+<div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="filterModalLabel">Filter Options</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Filter Form -->
+            <form id="filterForm" method="get" action="">
+                <div class="mb-3">
+                <label for="sort" class="form-label">Sort By</label>
+                <select class="form-select" id="sort" name="sort">
+                  <option value="">Sort By</option>
+                  <option value="distance">Distance</option>
+                  <option value="rating">Rating</option>
+                </select>
+              </div>
+
+              <div class="mb-3">
+                <label for="rating" class="form-label">Rating</label>
+                <select class="form-select" id="rating" name="rating">
+                  <option value="">Any</option>
+                  <option value="3.0">3.0+</option>
+                  <option value="4.0">4.0+</option>
+                  <option value="5.0">5.0</option>
+                </select>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="restroomsList"></div>
+
+    <div id="map" style="width: 100%; height: 400px;"></div> <!-- The map container -->
+
+    <div id="pagination"></div>
+
+<script type="text/javascript">
+
+    var isLoggedIn = {% if user.is_authenticated %}true{% else %}false{% endif %};
+</script>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCxEhJzSEW4WQOINMyTdUblD0w5WRd-n4w&libraries=places&callback=initMap" async defer></script>
+<script>
+        var map, directionsService, directionsRenderer, currentLocation, currentRouteSteps;
+        var isCurrentLocationAvailable = false;
+        var currentPage = 1;
+        var itemsPerPage = 5;
+        var favorites;
+        var filteredFav;
+
+        let data = {
+            _nearbyRestrooms: [], // the variable you want to observe
+
+            get nearbyRestrooms() {
+                return this._nearbyRestrooms;
+            },
+
+            set nearbyRestrooms(value) {
+                this._nearbyRestrooms = value;
+                applyFilters(); // Call applyFilters whenever the variable changes
+            }
+        };
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: {lat: -34.397, lng: 150.644},
+                zoom: 8
+            });
+
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            directionsRenderer.setMap(map);
+
+            var input = document.getElementById('autocomplete');
+            autocomplete = new google.maps.places.Autocomplete(input);
+
+            // Listener for when a user selects a place
+            autocomplete.addListener('place_changed', function() {
+                var place = autocomplete.getPlace();
+                if (!place.geometry) {
+                    console.log("No details available for input: '" + place.name + "'");
+                    return;
+                }
+                sendSearchQuery(place.name);
+                // Find nearby restrooms based on the selected place's location
+                findNearbyRestrooms(place.geometry.location);
+            });
+
+            // Optionally get current location on page load
+            getCurrentLocation();
+        }
+
+        function calculateDistanceForRestroom(restroom) {
+            return new Promise((resolve, reject) => {
+                const origin = new google.maps.LatLng(currentLocation.lat(), currentLocation.lng());
+                const destination = new google.maps.LatLng(restroom.lat, restroom.lng);
+
+                directionsService.route({
+                    origin: origin,
+                    destination: destination,
+                    travelMode: google.maps.TravelMode.DRIVING
+                }, function(response, status) {
+                    if (status === 'OK') {
+                        const route = response.routes[0];
+                        const leg = route.legs[0];
+                        const distance = leg.distance.text;
+                        const duration = leg.duration.text
+                        resolve({ distance, duration });
+                    } else {
+                        console.log('Directions request failed due to ' + status);
+                        resolve({ distance: null, duration: null });
+                    }
+                });
+            });
+        }
+
+        function findNearbyRestrooms(location) {
+            let service = new google.maps.places.PlacesService(document.createElement('div'));
+            service.nearbySearch({
+                keyword: 'restroom',
+                location: location,
+                radius: 20000, // Search in a 20,000 meter radius
+                type: ['restroom'],
+            }, processNearbyRestroomResults);
+        }
+
+        async function processNearbyRestroomResults(results, status) {
+            if (status === google.maps.places.PlacesServiceStatus.OK) {
+                data.nearbyRestrooms = []; // Clear previous restroom places
+
+                for (const place of results) {
+                    await new Promise((resolve, reject) => {
+                        const service = new google.maps.places.PlacesService(document.createElement('div'));
+                        service.getDetails({
+                            placeId: place.place_id
+                        }, async (placeResult, placeStatus) => {
+                            if (placeStatus === google.maps.places.PlacesServiceStatus.OK) {
+                                const restroom = {
+                                    address: placeResult.formatted_address,
+                                    lat: placeResult.geometry.location.lat(),
+                                    lng: placeResult.geometry.location.lng(),
+                                    name: placeResult.name,
+                                    distance: null,
+                                    duration: null,
+                                    rating: placeResult.rating ? placeResult.rating : 0,
+                                    photoUrl: placeResult.photos ? placeResult.photos[0].getUrl() : null,
+                                    isFav: favorites.some(fav => fav.lat === placeResult.geometry.location.lat() && fav.lng === placeResult.geometry.location.lng())
+                                };
+
+                                if (isCurrentLocationAvailable) {
+                                    const { distance, duration } = await calculateDistanceForRestroom({ lat: restroom.lat, lng: restroom.lng });
+                                    restroom.distance = distance;
+                                    restroom.duration = duration;
+                                }
+
+                                data.nearbyRestrooms.push(restroom);
+                            }
+                            resolve();
+                        });
+                    });
+                }
+                handleNearbyRestrooms(data.nearbyRestrooms);
+            }
+        }
+
+        function handleNearbyRestrooms(restrooms) {
+            let startIndex = (currentPage - 1) * itemsPerPage;
+            let endIndex = Math.min(startIndex + itemsPerPage, restrooms.length);
+            let paginatedRestrooms = restrooms.slice(startIndex, endIndex);
+
+            // Find or create a container element to display the restrooms
+            let container = document.getElementById('restroomsList');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'restroomsList';
+                document.body.appendChild(container);
+            }
+
+            // Clear the previous content
+            container.innerHTML = '';
+
+            // Loop through the restrooms array and create card items
+            paginatedRestrooms.forEach(function(restroom, index) {
+                // Create the card element with Bootstrap classes
+                let card = document.createElement('div');
+                card.classList.add('card', 'mb-3');
+
+                card.setAttribute('style', 'width: 75%;margin-left: auto;margin-right: auto;')
+
+                // Add restroom details to the card
+                let cardBody = document.createElement('div');
+                cardBody.classList.add('card-body', 'd-flex', 'justify-content-between');
+
+                let textContentDiv = document.createElement('div');
+
+                let title = document.createElement('h5');
+                title.classList.add('card-title');
+                title.setAttribute('style', "font-weight:bold;");
+                title.textContent = restroom.name;
+
+                let text = document.createElement('p');
+                text.classList.add('card-text', 'm-0');
+                text.textContent = restroom.address;
+
+                let rating = document.createElement('p');
+                rating.classList.add('card-text', 'm-0');
+                rating.textContent = "Rating: "+ restroom.rating;
+
+                let distance = document.createElement('p');
+                distance.classList.add('card-text', 'm-0');
+                distance.textContent = "Distance: "+ restroom.distance;
+
+                let duration = document.createElement('p');
+                duration.classList.add('card-text', 'm-0');
+                duration.textContent = "Duration: "+ restroom.duration;
+
+                textContentDiv.appendChild(title);
+                textContentDiv.appendChild(text);
+                textContentDiv.appendChild(rating);
+                if (isCurrentLocationAvailable) {
+                    textContentDiv.appendChild(distance);
+                    textContentDiv.appendChild(duration);
+                }
+
+                cardBody.appendChild(textContentDiv);
+
+                // Create a container for the heart icon and the button
+                let actionContainer = document.createElement('div');
+                actionContainer.classList.add('d-flex', 'justify-content-between', 'align-items-center');
+
+                // Create the heart symbol element
+                if (isLoggedIn) {
+                    let heartIcon = document.createElement('i');
+                    if(restroom.isFav) {
+                        heartIcon.classList.add('bi', 'bi-heart-fill', 'heart-icon');
+                        heartIcon.style.color = 'red';
+                    } else {
+                        heartIcon.classList.add('bi', 'bi-heart', 'heart-icon');
+                    }
+                    heartIcon.style.cursor = 'pointer'; // Change cursor on hover
+                    heartIcon.style.fontSize = '1.5rem'
+                    heartIcon.style.marginRight = '10px';
+                    heartIcon.setAttribute('data-id', index);
+
+                    actionContainer.appendChild(heartIcon);
+                }
+
+                // Create the button element
+                let button = document.createElement('a');
+                button.classList.add('btn', 'btn-primary', 'get-directions-btn', 'responsive-button');
+                button.textContent = 'Get Directions';
+                button.style.height = '40px';
+
+                let div = document.createElement('div');
+                div.classList.add('row');
+                div.setAttribute('style', "margin-top:auto;margin-bottom:auto;");
+
+                // let button = document.createElement('a');
+                // button.classList.add('btn', 'btn-primary', 'get-directions-btn', 'responsive-button');
+                if (!isCurrentLocationAvailable) {
+                    actionContainer.setAttribute('title', "Please Login & Grant Location Permission");
+                    button.classList.add('disabled');
+                }
+
+                button.setAttribute('style', "margin-top:auto;margin-bottom:auto;");
+
+                button.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    let origin = currentLocation.lat() + ',' + currentLocation.lng();
+                    let destination = restroom.lat + ',' + restroom.lng;
+                    let googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
+                    window.open(googleMapsUrl, '_blank');
+                });
+                actionContainer.appendChild(button);
+                cardBody.appendChild(actionContainer);
+
+
+                // Append the flex container to the card body instead of individual elements
+                card.appendChild(cardBody);
+                container.appendChild(card);
+            });
+            updatePaginationControls(restrooms.length);
+        }
+
+        function updatePaginationControls(totalItems) {
+            let totalPages = Math.ceil(totalItems / itemsPerPage);
+            let paginationElement = document.getElementById('pagination');
+            if (!paginationElement) {
+                // Create pagination element if it does not exist
+                paginationElement = document.createElement('nav');
+                paginationElement.id = 'pagination';
+                document.body.appendChild(paginationElement);
+            }
+            paginationElement.innerHTML = ''; // Clear existing controls
+
+            // Create a flex container div for centering
+            let flexContainer = document.createElement('div');
+            flexContainer.classList.add('d-flex', 'justify-content-center');
+
+            // Create the UL element for pagination
+            let ul = document.createElement('ul');
+            ul.classList.add('pagination');
+
+            for (let i = 1; i <= totalPages; i++) {
+                let li = document.createElement('li');
+                li.classList.add('page-item');
+                if (currentPage === i) {
+                    li.classList.add('active'); // Highlight the current page
+                }
+
+                let a = document.createElement('a');
+                a.classList.add('page-link');
+                a.href = '#';
+                a.textContent = i;
+                a.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    currentPage = i;
+                    handleNearbyRestrooms(data.nearbyRestrooms);
+                });
+
+                li.appendChild(a);
+                ul.appendChild(li);
+            }
+
+            // Append the UL element to the flex container
+            flexContainer.appendChild(ul);
+
+            // Append the flex container to the pagination element
+            paginationElement.appendChild(flexContainer);
+        }
+
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    // Define currentLocation as a LatLng object
+                    currentLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+                    isCurrentLocationAvailable = true;
+                    findNearbyRestrooms(currentLocation);
+                    // Now currentLocation is ready to be used in calculateAndDisplayRoute
+                }, function(error) {
+                    console.error("Error getting current location:", error);
+                    isCurrentLocationAvailable = false;
+                });
+            } else {
+                console.log("Geolocation is not supported by this browser.");
+                isCurrentLocationAvailable = false;
+            }
+        }
+
+        function sendSearchQuery(query) {
+            fetch('/api/store-search-query/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => response.json())
+            .then(data => console.log(data))
+            .catch(error => console.error('Error:', error));
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Attach event listeners to filter elements
+            document.getElementById('sort').addEventListener('change', applyFilters);
+            document.getElementById('rating').addEventListener('change', applyFilters);
+
+            // Initial filter application
+            applyFilters();
+        });
+
+        function applyFilters() {
+            let sortPreference = document.getElementById('sort').value;
+            let ratingPreference = parseFloat(document.getElementById('rating').value);
+
+            // First, filter the restrooms based on the rating
+            filteredFav = data.nearbyRestrooms.filter(restroom => {
+                return isNaN(ratingPreference) || (restroom.rating && restroom.rating >= ratingPreference);
+            });
+
+            // Then, sort the filtered list based on the sort preference
+            if (sortPreference === 'distance') {
+                filteredFav.sort((a, b) => {
+                    const parseDistance = (distance) => {
+                        if (distance === 0 || distance === "0" || distance === "0 mi") {
+                            return Number.MAX_VALUE;
+                        } else {
+                            return parseFloat(distance.replace(" mi", ""));
+                        }
+                    };
+                    const distanceA = parseDistance(a.distance);
+                    const distanceB = parseDistance(b.distance);
+                    return distanceA - distanceB;
+                });
+            } else if (sortPreference === 'rating') {
+                filteredFav.sort((a, b) => {
+                    const ratingA = a.rating || 0;
+                    const ratingB = b.rating || 0;
+                    return ratingB - ratingA;
+                });
+            }
+
+            // Handle no results
+            if (filteredFav.length === 0) {
+                displayNoResultsMessage();
+            } else {
+                handleNearbyRestrooms(filteredFav);
+            }
+        }
+
+        function displayNoResultsMessage() {
+            let container = document.getElementById('restroomsList');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'restroomsList';
+                document.body.appendChild(container);
+            }
+            container.innerHTML = '<p>No restrooms available with the selected criteria.</p>';
+        }
+
+        document.getElementById('autocomplete').addEventListener('focus', function() {
+            fetch('api/get-search-history/', {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',  // Required for Django to recognize AJAX request
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const historyDataList = document.getElementById('history-list');
+                // Clear existing options
+                historyDataList.innerHTML = '';
+
+                // Populate datalist with history items
+                data.history.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.query;
+                    historyDataList.appendChild(option);
+                });
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fetch the user's favorite restrooms
+            fetch('/fav/get-user-favorites/', {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                }
+            })
+            .then(response => response.json())
+            .then(fav_data => {
+                favorites = fav_data.favorites;
+                document.querySelectorAll('.restroom').forEach(restroomElement => {
+                    const restroomId = restroomElement.getAttribute('data-id');
+                    if (favorites.includes(restroomId)) {
+                        const heartIcon = restroomElement.querySelector('.heart-icon');
+                        if (heartIcon) {
+                            heartIcon.classList.replace('bi-heart', 'bi-heart-fill');
+                            heartIcon.style.color = 'red';
+                        }
+                    }
+                });
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        document.body.addEventListener('click', function(e) {
+            if (e.target && e.target.matches('.heart-icon')) {
+                const itemId = e.target.getAttribute('data-id');
+                const id = parseInt(itemId) + parseInt((currentPage - 1) * itemsPerPage);
+                let restroomData;
+                if(filteredFav.length != 0) {
+                    restroomData = filteredFav[id];
+                } else {
+                    restroomData = data.nearbyRestrooms[id];
+                }
+
+                if (!e.target.classList.contains('bi-heart-fill')) {
+                    e.target.classList.replace('bi-heart', 'bi-heart-fill');
+                    e.target.style.color = 'red';
+                    updateFavorite(restroomData, true);
+                } else {
+                    e.target.classList.replace('bi-heart-fill', 'bi-heart');
+                    e.target.style.color = 'initial';
+                    updateFavorite(restroomData, false);
+                }
+            }
+        });
+
+        function updateFavorite(restroomData, isFavorite) {
+            fetch('/fav/update-favorite/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    restroom: restroomData,
+                    favorite: isFavorite,
+                    fromFav: false
+                })
+            })
+            .then(response => response.json())
+            .then(data => console.log("Response from server:", data))
+            .catch(error => console.error('Error:', error));
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Use 'isLoggedIn' to check if the user is logged in
+            if (isLoggedIn) {
+                // User is logged in - enable features like favoriting
+                enableHeartIcons();
+            } else {
+                // User is not logged in - disable features or modify behavior
+                disableHeartIcons();
+            }
+        });
+
+        function enableHeartIcons() {
+            document.querySelectorAll('.heart-icon').forEach(function(heartIcon) {
+                heartIcon.style.pointerEvents = 'auto'; // Enable click events
+                heartIcon.title = ''; // Remove the tooltip if any
+            });
+        }
+
+        function disableHeartIcons() {
+            document.querySelectorAll('.heart-icon').forEach(function(heartIcon) {
+                heartIcon.style.pointerEvents = 'none'; // Disables click events
+                heartIcon.title = 'Please log in to use this feature'; // Tooltip on hover
+            });
+        }
+
+</script>
+{% endblock content %}

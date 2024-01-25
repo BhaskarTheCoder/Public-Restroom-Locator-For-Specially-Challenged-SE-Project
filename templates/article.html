@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block active %}
+    {% with active='aof' %}{{ block.super }}{% endwith %}
+{% endblock %}
+
+{% block title %}
+    <title>The Beatles | Area of Focus</title>
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+      <div class="row">
+        <div class="col-md-8 card mb-4  mt-3 left top">
+          <div class="card-body">
+            <h1>{% block post_title %} {{ object.title }} {% endblock post_title %}</h1>
+            <p class=" text-muted">{{ post.author }} | {{ post.created_on }}</p>
+            <p class="card-text ">{{ object.content | safe }}</p>
+          </div>
+        </div>
+        {% block sidebar %} {% include 'sidebar.html' %} {% endblock sidebar %}
+      </div>
+    </div>
+    {% endblock content %}

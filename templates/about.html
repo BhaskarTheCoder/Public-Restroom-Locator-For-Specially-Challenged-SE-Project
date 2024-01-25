@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block active %}
+    {% with active='about' %}{{ block.super }}{% endwith %}
+{% endblock %}
+
+{% block title %}
+    <title>The Beatles | About</title>
+    <style>
+        .values li::before {
+            content: '✓'; /* Example bullet point */
+            color: #2a9d8f; /* Example color */
+            margin-right: 8px;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <main>
+        <div class="container">
+            <div class="row">
+                <div class="col-md-8 mx-auto">
+                     <section class="about py-5" style="padding-bottom:0px !important">
+                        <h1 style="color: #023047;font-size: 2em;">About The Beatles</h1>
+                        <p>Restroom Finder is a dedicated platform for individuals with disabilities to locate accessible restrooms with ease and dignity.</p>
+                    </section>
+
+                    <section class="mission">
+                        <h2 style="color: #023047;font-size: 1.5em;">Our Mission</h2>
+                        <p>To create a comprehensive and user-friendly resource that helps individuals with disabilities find safe, accessible restrooms in any location.</p>
+                    </section>
+
+                    <section class="vision">
+                        <h2 style="color: #023047;font-size: 1.5em;">Our Vision</h2>
+                        <p>A world where accessibility is not an afterthought, and everyone can find the amenities they need without undue stress or difficulty.</p>
+                    </section>
+
+                    <section class="values">
+                        <h2 style="color: #023047;font-size: 1.5em;">Our Values</h2>
+                        <ul style="list-style: none;">
+                            <li>Accessibility for all</li>
+                            <li>Community-driven support</li>
+                            <li>Up-to-date and accurate information</li>
+                            <li>Privacy and dignity for our users</li>
+                        </ul>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </main>
+{% endblock content %}
