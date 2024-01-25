@@ -1,6 +1,9 @@
 Team Name: The Beatles
+
 Project Title: Public Restroom Locator For Specially Challenged
+
 Course Name: Software Engineering
+
 Semester: Fall 2023
 
 ### To run the code follow the provided steps:
