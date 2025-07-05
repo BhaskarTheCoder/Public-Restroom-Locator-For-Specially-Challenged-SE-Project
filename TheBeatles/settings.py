@@ -24,9 +24,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-a9+hzsfv4jd+tvbd&taj9)m(z*1s014@q8po30rtrj=!oca^&m'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['floating-caverns-08751-9995cb4244d3.herokuapp.com', 'public-restroom-locator-app-f7e3f12f2b3e.herokuapp.com', '127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ["3.87.229.79","http://3.87.229.79"]
 
 
 # Application definition
@@ -88,16 +88,16 @@ WSGI_APPLICATION = 'TheBeatles.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'TheBeatles',
-        'USER': 'postgres',
-        'PASSWORD': 'root',
-        'HOST': 'localhost',
-        'PORT': '5432'
+        'NAME': 'thebeatlesdb',  # your RDS db name
+        'USER': 'postgres',    # or the RDS username you chose
+        'PASSWORD': '30ydxH6mzArOLiXONnKV',
+        'HOST': 'thebeatlesdb.cidgcy8um3y9.us-east-1.rds.amazonaws.com',
+        'PORT': '5432',
     }
 }
 
-db_from_env = dj_database_url.config(conn_max_age=600)
-DATABASES['default'].update(db_from_env)
+# db_from_env = dj_database_url.config(conn_max_age=600)
+# DATABASES['default'].update(db_from_env)
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
