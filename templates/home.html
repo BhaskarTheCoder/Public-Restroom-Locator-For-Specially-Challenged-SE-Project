@@ -11,19 +11,24 @@
 
 {% block content %}
 <div class="search-container d-flex align-items-center justify-content-center p-3 bg-light rounded-3 shadow-sm mx-auto my-3" style="border-radius:2.3rem !important;border: 0.5px solid #ced4da;">
-    <h5 class="mb-0">Find Nearest Restrooms</h5>
-    <button class="btn ms-4" style="background-color:#2c3e50;color:White;border-radius:20px;" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
+    <label for="autocomplete" class="visually-hidden">Search for Nearest Restrooms</label>
+    <input type="text" class="form-control me-2 pac-target-input" placeholder="Find Nearest Restrooms" id="autocomplete" list="history-list" autocomplete="off">
+    <datalist id="history-list"></datalist>
+    <button class="btn" style="background-color:#2c3e50;color:White;border-radius:20px;" data-bs-toggle="modal" data-bs-target="#filterModal">Filter</button>
 </div>
 
+<!-- Google Maps Web Components Loader -->
 <gmpx-api-loader key="AIzaSyCIcFnVUowxRlXchoRiI1nQKy_hsw461c4" solution-channel="GMP_GE_mapsandplacesautocomplete_v2"></gmpx-api-loader>
 
-<gmp-map center="33.1581,-96.8288" zoom="12" map-id="e15cafdbe2afbad4291f5492" style="height: 500px">
+<!-- Combined Map with Place Picker -->
+<gmp-map center="40.749933,-73.98633" zoom="13" map-id="DEMO_MAP_ID" style="width: 100%; height: 400px;">
     <div slot="control-block-start-inline-start" class="place-picker-container">
-        <gmpx-place-picker placeholder="Enter a location" style="width: 300px;"></gmpx-place-picker>
+        <gmpx-place-picker placeholder="Find Nearest Restroom"></gmpx-place-picker>
     </div>
+    <gmp-advanced-marker></gmp-advanced-marker>
 </gmp-map>
 
-
+<!-- Filter Modal -->
 <div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -59,291 +64,445 @@
     </div>
 </div>
 
-<div id="restroomsList" class="mt-4"></div>
-<div id="pagination" class="my-3"></div>
+<!-- Nearby Results -->
+<div id="restroomsList"></div>
+<div id="pagination"></div>
 
 <style>
     .place-picker-container {
-        padding: 1rem;
+        padding: 20px;
     }
 </style>
 
+<script type="module">
+  async function init() {
+    await customElements.whenDefined('gmp-map');
+
+    const map = document.querySelector('gmp-map');
+    const marker = document.querySelector('gmp-advanced-marker');
+    const placePicker = document.querySelector('gmpx-place-picker');
+    const infowindow = new google.maps.InfoWindow();
+
+    map.innerMap.setOptions({ mapTypeControl: false });
+
+    placePicker.addEventListener('gmpx-placechange', () => {
+      const place = placePicker.value;
+
+      if (!place.location) {
+        alert("No location found for: " + place.name);
+        infowindow.close();
+        marker.position = null;
+        return;
+      }
+
+      if (place.viewport) {
+        map.innerMap.fitBounds(place.viewport);
+      } else {
+        map.center = place.location;
+        map.zoom = 17;
+      }
+
+      marker.position = place.location;
+      infowindow.setContent(`
+        <strong>${place.displayName}</strong><br>
+        <span>${place.formattedAddress}</span>
+      `);
+      infowindow.open(map.innerMap, marker);
+
+      // Call your original findNearbyRestrooms function with new location
+      if (typeof findNearbyRestrooms === 'function') {
+        findNearbyRestrooms(place.location);
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+</script>
+
 <script>
-    // --- GLOBAL VARIABLES AND SETUP ---
-    var directionsService;
-    var currentLocation;
-    var isCurrentLocationAvailable = false;
-    var isLoggedIn = {% if user.is_authenticated %}true{% else %}false{% endif %};
-    var currentPage = 1;
-    var itemsPerPage = 5;
-    var favorites = [];
-    var filteredFav = [];
+  var isLoggedIn = {% if user.is_authenticated %}true{% else %}false{% endif %};
+</script>
 
-    // Reactive data object to trigger filtering when restrooms are updated
-    let data = {
-        _nearbyRestrooms: [],
-        get nearbyRestrooms() {
-            return this._nearbyRestrooms;
-        },
-        set nearbyRestrooms(value) {
-            this._nearbyRestrooms = value;
-            applyFilters();
-        }
-    };
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCIcFnVUowxRlXchoRiI1nQKy_hsw461c4&libraries=places&callback=initMap"></script>
 
-    // --- INITIALIZATION LOGIC (RUNS AFTER COMPONENTS ARE READY) ---
-    async function init() {
-        // Wait for Google Maps Web Components to be defined
-        await customElements.whenDefined('gmp-map');
-        
-        // Initialize services that require the Google Maps API
-        directionsService = new google.maps.DirectionsService();
+<!-- App Logic Script -->
 
-        const mapComponent = document.querySelector('gmp-map');
-        const placePicker = document.querySelector('gmpx-place-picker');
-        
-        // --- EVENT LISTENER FOR THE NEW PLACE PICKER ---
-        placePicker.addEventListener('gmpx-placechange', () => {
-            const place = placePicker.value;
-            if (place && place.location) {
-                // When a new place is selected, center the map and find restrooms
-                mapComponent.center = place.location;
-                mapComponent.zoom = 14;
-                findNearbyRestrooms(place.location);
+<script>
+        var map, directionsService, directionsRenderer, currentLocation, currentRouteSteps;
+        var isCurrentLocationAvailable = false;
+        var currentPage = 1;
+        var itemsPerPage = 5;
+        var favorites;
+        var filteredFav;
+
+        let data = {
+            _nearbyRestrooms: [], // the variable you want to observe
+
+            get nearbyRestrooms() {
+                return this._nearbyRestrooms;
+            },
+
+            set nearbyRestrooms(value) {
+                this._nearbyRestrooms = value;
+                applyFilters(); // Call applyFilters whenever the variable changes
             }
-        });
+        };
 
-        // Get user's current location to start
-        getCurrentLocation();
-    }
-
-    // Start the initialization process once the DOM is loaded
-    document.addEventListener('DOMContentLoaded', init);
-
-
-    // --- CORE APPLICATION LOGIC (Your original functions, slightly adapted) ---
-
-    function calculateDistanceForRestroom(restroom) {
-        return new Promise((resolve) => {
-            const origin = currentLocation; // Already a LatLng object
-            const destination = new google.maps.LatLng(restroom.lat, restroom.lng);
-
-            directionsService.route({
-                origin: origin,
-                destination: destination,
-                travelMode: google.maps.TravelMode.DRIVING
-            }, function(response, status) {
-                if (status === 'OK') {
-                    const leg = response.routes[0].legs[0];
-                    resolve({ distance: leg.distance.text, duration: leg.duration.text });
-                } else {
-                    console.log('Directions request failed: ' + status);
-                    resolve({ distance: 'N/A', duration: 'N/A' });
-                }
-            });
-        });
-    }
-
-    function findNearbyRestrooms(location) {
-        // The PlacesService needs a div, but it doesn't have to be on the page
-        const placesService = new google.maps.places.PlacesService(document.createElement('div'));
-        placesService.nearbySearch({
-            keyword: 'restroom',
-            location: location,
-            radius: 20000,
-        }, processNearbyRestroomResults);
-    }
-
-    async function processNearbyRestroomResults(results, status) {
-        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-            let processedRestrooms = [];
-            for (const place of results) {
-                 if (!place.geometry || !place.geometry.location) continue;
-                 
-                 const restroom = {
-                    address: place.vicinity || place.formatted_address,
-                    lat: place.geometry.location.lat(),
-                    lng: place.geometry.location.lng(),
-                    name: place.name,
-                    distance: null,
-                    duration: null,
-                    rating: place.rating ? place.rating : 0,
-                    isFav: favorites.some(fav => fav.lat === place.geometry.location.lat() && fav.lng === place.geometry.location.lng())
-                };
-
-                if (isCurrentLocationAvailable) {
-                    const { distance, duration } = await calculateDistanceForRestroom(restroom);
-                    restroom.distance = distance;
-                    restroom.duration = duration;
-                }
-                processedRestrooms.push(restroom);
-            }
-            // Set the global data object, which will trigger applyFilters and repaint the list
-            data.nearbyRestrooms = processedRestrooms;
-        }
-    }
-
-    function handleNearbyRestrooms(restrooms) {
-        let startIndex = (currentPage - 1) * itemsPerPage;
-        let endIndex = Math.min(startIndex + itemsPerPage, restrooms.length);
-        let paginatedRestrooms = restrooms.slice(startIndex, endIndex);
-
-        let container = document.getElementById('restroomsList');
-        container.innerHTML = ''; // Clear previous content
-
-        paginatedRestrooms.forEach(function(restroom, index) {
-            let card = document.createElement('div');
-            card.className = 'card mb-3 mx-auto';
-            card.style.width = '75%';
-
-            let cardBody = document.createElement('div');
-            cardBody.className = 'card-body d-flex justify-content-between align-items-center';
-
-            let textContentDiv = document.createElement('div');
-
-            textContentDiv.innerHTML = `
-                <h5 class="card-title" style="font-weight:bold;">${restroom.name}</h5>
-                <p class="card-text m-0">${restroom.address}</p>
-                <p class="card-text m-0">Rating: ${restroom.rating} ★</p>
-                ${isCurrentLocationAvailable ? `
-                <p class="card-text m-0">Distance: ${restroom.distance}</p>
-                <p class="card-text m-0">Duration: ${restroom.duration}</p>
-                ` : ''}
-            `;
-            
-            cardBody.appendChild(textContentDiv);
-            
-            // Action container for button and favorite icon
-            let actionContainer = document.createElement('div');
-            actionContainer.className = 'd-flex flex-column align-items-center';
-
-            if (isLoggedIn) {
-                 let heartIcon = document.createElement('i');
-                 heartIcon.className = restroom.isFav ? 'bi bi-heart-fill heart-icon' : 'bi bi-heart heart-icon';
-                 heartIcon.style.color = restroom.isFav ? 'red' : 'initial';
-                 heartIcon.style.cursor = 'pointer';
-                 heartIcon.style.fontSize = '1.5rem';
-                 heartIcon.style.marginBottom = '10px';
-                 heartIcon.setAttribute('data-id', index);
-                 actionContainer.appendChild(heartIcon);
-            }
-            
-            let button = document.createElement('a');
-            button.className = 'btn btn-primary get-directions-btn';
-            button.textContent = 'Get Directions';
-            if (!isCurrentLocationAvailable) {
-                button.classList.add('disabled');
-                actionContainer.setAttribute('title', "Grant Location Permission for Directions");
-            }
-            
-            button.addEventListener('click', function(e) {
-                e.preventDefault();
-                if(isCurrentLocationAvailable) {
-                    let origin = `${currentLocation.lat()},${currentLocation.lng()}`;
-                    let destination = `${restroom.lat},${restroom.lng}`;
-                    let googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
-                    window.open(googleMapsUrl, '_blank');
-                }
-            });
-
-            actionContainer.appendChild(button);
-            cardBody.appendChild(actionContainer);
-            card.appendChild(cardBody);
-            container.appendChild(card);
-        });
-
-        updatePaginationControls(restrooms.length);
-    }
-    
-    function getCurrentLocation() {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    currentLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
-                    isCurrentLocationAvailable = true;
-                    
-                    // Center the map on the user and find restrooms
-                    const mapComponent = document.querySelector('gmp-map');
-                    mapComponent.center = currentLocation;
-                    findNearbyRestrooms(currentLocation);
-                }, 
-                (error) => {
-                    console.error("Error getting current location:", error);
-                    // If location fails, it will use the default center from the HTML
-                    findNearbyRestrooms(document.querySelector('gmp-map').center);
-                }
-            );
-        }
-    }
-    
-    // --- FILTERING AND UTILITY FUNCTIONS (Largely unchanged) ---
-
-    function updatePaginationControls(totalItems) {
-        let totalPages = Math.ceil(totalItems / itemsPerPage);
-        let paginationElement = document.getElementById('pagination');
-        paginationElement.innerHTML = '';
-
-        if (totalPages <= 1) return;
-
-        let ul = document.createElement('ul');
-        ul.className = 'pagination justify-content-center';
-
-        for (let i = 1; i <= totalPages; i++) {
-            let li = document.createElement('li');
-            li.className = `page-item ${currentPage === i ? 'active' : ''}`;
-            let a = document.createElement('a');
-            a.className = 'page-link';
-            a.href = '#';
-            a.textContent = i;
-            a.addEventListener('click', function(e) {
-                e.preventDefault();
-                currentPage = i;
-                applyFilters(); // Re-apply filters for the new page
-            });
-            li.appendChild(a);
-ul.appendChild(li);
-        }
-        paginationElement.appendChild(ul);
-    }
-
-    function applyFilters() {
-        let sortPreference = document.getElementById('sort').value;
-        let ratingPreference = parseFloat(document.getElementById('rating').value);
-
-        filteredFav = data.nearbyRestrooms.filter(restroom => {
-            return isNaN(ratingPreference) || (restroom.rating && restroom.rating >= ratingPreference);
-        });
-
-        if (sortPreference === 'distance') {
-            filteredFav.sort((a, b) => {
-                const parseDistance = (distance) => distance ? parseFloat(distance) : Number.MAX_VALUE;
-                return parseDistance(a.distance) - parseDistance(b.distance);
-            });
-        } else if (sortPreference === 'rating') {
-            filteredFav.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        }
-        
-        currentPage = 1; // Reset to first page after filtering
-        
-        if (filteredFav.length === 0) {
-            displayNoResultsMessage();
-        } else {
-            handleNearbyRestrooms(filteredFav);
-        }
-    }
-
-    function displayNoResultsMessage() {
-        let container = document.getElementById('restroomsList');
-        container.innerHTML = '<p class="text-center">No restrooms available with the selected criteria.</p>';
-        document.getElementById('pagination').innerHTML = '';
-    }
-    
-    document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('sort').addEventListener('change', applyFilters);
-        document.getElementById('rating').addEventListener('change', applyFilters);
+        // Define globally so callback works
+  window.initMap = function () {
+    console.log("initMap loaded");
+    map = new google.maps.Map(document.getElementById('map'), {
+      center: { lat: 37.7749, lng: -122.4194 },  // fallback location (San Francisco)
+      zoom: 12
     });
 
+    directionsService = new google.maps.DirectionsService();
+    directionsRenderer = new google.maps.DirectionsRenderer();
+    directionsRenderer.setMap(map);
 
+    var input = document.getElementById('autocomplete');
+    autocomplete = new google.maps.places.Autocomplete(input);
+
+    autocomplete.addListener('place_changed', function () {
+      var place = autocomplete.getPlace();
+      if (!place.geometry) {
+        console.log("No details available for input: '" + place.name + "'");
+        return;
+      }
+      sendSearchQuery(place.name);
+      findNearbyRestrooms(place.geometry.location);
+    });
+
+    getCurrentLocation();
+  };
+
+        function calculateDistanceForRestroom(restroom) {
+            return new Promise((resolve, reject) => {
+                const origin = new google.maps.LatLng(currentLocation.lat(), currentLocation.lng());
+                const destination = new google.maps.LatLng(restroom.lat, restroom.lng);
+
+                directionsService.route({
+                    origin: origin,
+                    destination: destination,
+                    travelMode: google.maps.TravelMode.DRIVING
+                }, function(response, status) {
+                    if (status === 'OK') {
+                        const route = response.routes[0];
+                        const leg = route.legs[0];
+                        const distance = leg.distance.text;
+                        const duration = leg.duration.text
+                        resolve({ distance, duration });
+                    } else {
+                        console.log('Directions request failed due to ' + status);
+                        resolve({ distance: null, duration: null });
+                    }
+                });
+            });
+        }
+
+        function findNearbyRestrooms(location) {
+            let service = new google.maps.places.PlacesService(document.createElement('div'));
+            service.nearbySearch({
+                keyword: 'restroom',
+                location: location,
+                radius: 20000, // Search in a 20,000 meter radius
+                type: ['restroom'],
+            }, processNearbyRestroomResults);
+        }
+
+        async function processNearbyRestroomResults(results, status) {
+            if (status === google.maps.places.PlacesServiceStatus.OK) {
+                data.nearbyRestrooms = []; // Clear previous restroom places
+
+                for (const place of results) {
+                    await new Promise((resolve, reject) => {
+                        const service = new google.maps.places.PlacesService(document.createElement('div'));
+                        service.getDetails({
+                            placeId: place.place_id
+                        }, async (placeResult, placeStatus) => {
+                            if (placeStatus === google.maps.places.PlacesServiceStatus.OK) {
+                                const restroom = {
+                                    address: placeResult.formatted_address,
+                                    lat: placeResult.geometry.location.lat(),
+                                    lng: placeResult.geometry.location.lng(),
+                                    name: placeResult.name,
+                                    distance: null,
+                                    duration: null,
+                                    rating: placeResult.rating ? placeResult.rating : 0,
+                                    photoUrl: placeResult.photos ? placeResult.photos[0].getUrl() : null,
+                                    isFav: favorites.some(fav => fav.lat === placeResult.geometry.location.lat() && fav.lng === placeResult.geometry.location.lng())
+                                };
+
+                                if (isCurrentLocationAvailable) {
+                                    const { distance, duration } = await calculateDistanceForRestroom({ lat: restroom.lat, lng: restroom.lng });
+                                    restroom.distance = distance;
+                                    restroom.duration = duration;
+                                }
+
+                                data.nearbyRestrooms.push(restroom);
+                            }
+                            resolve();
+                        });
+                    });
+                }
+                handleNearbyRestrooms(data.nearbyRestrooms);
+            }
+        }
+
+        function handleNearbyRestrooms(restrooms) {
+            let startIndex = (currentPage - 1) * itemsPerPage;
+            let endIndex = Math.min(startIndex + itemsPerPage, restrooms.length);
+            let paginatedRestrooms = restrooms.slice(startIndex, endIndex);
+
+            // Find or create a container element to display the restrooms
+            let container = document.getElementById('restroomsList');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'restroomsList';
+                document.body.appendChild(container);
+            }
+
+            // Clear the previous content
+            container.innerHTML = '';
+
+            // Loop through the restrooms array and create card items
+            paginatedRestrooms.forEach(function(restroom, index) {
+                // Create the card element with Bootstrap classes
+                let card = document.createElement('div');
+                card.classList.add('card', 'mb-3');
+
+                card.setAttribute('style', 'width: 75%;margin-left: auto;margin-right: auto;')
+
+                // Add restroom details to the card
+                let cardBody = document.createElement('div');
+                cardBody.classList.add('card-body', 'd-flex', 'justify-content-between');
+
+                let textContentDiv = document.createElement('div');
+
+                let title = document.createElement('h5');
+                title.classList.add('card-title');
+                title.setAttribute('style', "font-weight:bold;");
+                title.textContent = restroom.name;
+
+                let text = document.createElement('p');
+                text.classList.add('card-text', 'm-0');
+                text.textContent = restroom.address;
+
+                let rating = document.createElement('p');
+                rating.classList.add('card-text', 'm-0');
+                rating.textContent = "Rating: "+ restroom.rating;
+
+                let distance = document.createElement('p');
+                distance.classList.add('card-text', 'm-0');
+                distance.textContent = "Distance: "+ restroom.distance;
+
+                let duration = document.createElement('p');
+                duration.classList.add('card-text', 'm-0');
+                duration.textContent = "Duration: "+ restroom.duration;
+
+                textContentDiv.appendChild(title);
+                textContentDiv.appendChild(text);
+                textContentDiv.appendChild(rating);
+                if (isCurrentLocationAvailable) {
+                    textContentDiv.appendChild(distance);
+                    textContentDiv.appendChild(duration);
+                }
+
+                cardBody.appendChild(textContentDiv);
+
+                // Create a container for the heart icon and the button
+                let actionContainer = document.createElement('div');
+                actionContainer.classList.add('d-flex', 'justify-content-between', 'align-items-center');
+
+                // Create the heart symbol element
+                if (isLoggedIn) {
+                    let heartIcon = document.createElement('i');
+                    if(restroom.isFav) {
+                        heartIcon.classList.add('bi', 'bi-heart-fill', 'heart-icon');
+                        heartIcon.style.color = 'red';
+                    } else {
+                        heartIcon.classList.add('bi', 'bi-heart', 'heart-icon');
+                    }
+                    heartIcon.style.cursor = 'pointer'; // Change cursor on hover
+                    heartIcon.style.fontSize = '1.5rem'
+                    heartIcon.style.marginRight = '10px';
+                    heartIcon.setAttribute('data-id', index);
+
+                    actionContainer.appendChild(heartIcon);
+                }
+
+                // Create the button element
+                let button = document.createElement('a');
+                button.classList.add('btn', 'btn-primary', 'get-directions-btn', 'responsive-button');
+                button.textContent = 'Get Directions';
+                button.style.height = '40px';
+
+                let div = document.createElement('div');
+                div.classList.add('row');
+                div.setAttribute('style', "margin-top:auto;margin-bottom:auto;");
+
+                // let button = document.createElement('a');
+                // button.classList.add('btn', 'btn-primary', 'get-directions-btn', 'responsive-button');
+                if (!isCurrentLocationAvailable) {
+                    actionContainer.setAttribute('title', "Please Login & Grant Location Permission");
+                    button.classList.add('disabled');
+                }
+
+                button.setAttribute('style', "margin-top:auto;margin-bottom:auto;");
+
+                button.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    let origin = currentLocation.lat() + ',' + currentLocation.lng();
+                    let destination = restroom.lat + ',' + restroom.lng;
+                    let googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
+                    window.open(googleMapsUrl, '_blank');
+                });
+                actionContainer.appendChild(button);
+                cardBody.appendChild(actionContainer);
+
+
+                // Append the flex container to the card body instead of individual elements
+                card.appendChild(cardBody);
+                container.appendChild(card);
+            });
+            updatePaginationControls(restrooms.length);
+        }
+
+        function updatePaginationControls(totalItems) {
+            let totalPages = Math.ceil(totalItems / itemsPerPage);
+            let paginationElement = document.getElementById('pagination');
+            if (!paginationElement) {
+                // Create pagination element if it does not exist
+                paginationElement = document.createElement('nav');
+                paginationElement.id = 'pagination';
+                document.body.appendChild(paginationElement);
+            }
+            paginationElement.innerHTML = ''; // Clear existing controls
+
+            // Create a flex container div for centering
+            let flexContainer = document.createElement('div');
+            flexContainer.classList.add('d-flex', 'justify-content-center');
+
+            // Create the UL element for pagination
+            let ul = document.createElement('ul');
+            ul.classList.add('pagination');
+
+            for (let i = 1; i <= totalPages; i++) {
+                let li = document.createElement('li');
+                li.classList.add('page-item');
+                if (currentPage === i) {
+                    li.classList.add('active'); // Highlight the current page
+                }
+
+                let a = document.createElement('a');
+                a.classList.add('page-link');
+                a.href = '#';
+                a.textContent = i;
+                a.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    currentPage = i;
+                    handleNearbyRestrooms(data.nearbyRestrooms);
+                });
+
+                li.appendChild(a);
+                ul.appendChild(li);
+            }
+
+            // Append the UL element to the flex container
+            flexContainer.appendChild(ul);
+
+            // Append the flex container to the pagination element
+            paginationElement.appendChild(flexContainer);
+        }
+
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    // Define currentLocation as a LatLng object
+                    currentLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+                    isCurrentLocationAvailable = true;
+                    findNearbyRestrooms(currentLocation);
+                    // Now currentLocation is ready to be used in calculateAndDisplayRoute
+                }, function(error) {
+                    console.error("Error getting current location:", error);
+                    isCurrentLocationAvailable = false;
+                });
+            } else {
+                console.log("Geolocation is not supported by this browser.");
+                isCurrentLocationAvailable = false;
+            }
+        }
+
+        function sendSearchQuery(query) {
+            fetch('/api/store-search-query/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => response.json())
+            .then(data => console.log(data))
+            .catch(error => console.error('Error:', error));
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Attach event listeners to filter elements
+            document.getElementById('sort').addEventListener('change', applyFilters);
+            document.getElementById('rating').addEventListener('change', applyFilters);
+
+            // Initial filter application
+            applyFilters();
+        });
+
+        function applyFilters() {
+            let sortPreference = document.getElementById('sort').value;
+            let ratingPreference = parseFloat(document.getElementById('rating').value);
+
+            // First, filter the restrooms based on the rating
+            filteredFav = data.nearbyRestrooms.filter(restroom => {
+                return isNaN(ratingPreference) || (restroom.rating && restroom.rating >= ratingPreference);
+            });
+
+            // Then, sort the filtered list based on the sort preference
+            if (sortPreference === 'distance') {
+                filteredFav.sort((a, b) => {
+                    const parseDistance = (distance) => {
+                        if (distance === 0 || distance === "0" || distance === "0 mi") {
+                            return Number.MAX_VALUE;
+                        } else {
+                            return parseFloat(distance.replace(" mi", ""));
+                        }
+                    };
+                    const distanceA = parseDistance(a.distance);
+                    const distanceB = parseDistance(b.distance);
+                    return distanceA - distanceB;
+                });
+            } else if (sortPreference === 'rating') {
+                filteredFav.sort((a, b) => {
+                    const ratingA = a.rating || 0;
+                    const ratingB = b.rating || 0;
+                    return ratingB - ratingA;
+                });
+            }
+
+            // Handle no results
+            if (filteredFav.length === 0) {
+                displayNoResultsMessage();
+            } else {
+                handleNearbyRestrooms(filteredFav);
+            }
+        }
+
+        function displayNoResultsMessage() {
+            let container = document.getElementById('restroomsList');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'restroomsList';
+                document.body.appendChild(container);
+            }
+            container.innerHTML = '<p>No restrooms available with the selected criteria.</p>';
+        }
 
         document.getElementById('autocomplete').addEventListener('focus', function() {
             fetch('api/get-search-history/', {
