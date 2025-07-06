@@ -90,10 +90,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'thebeatlesdb',  # your RDS db name
         'USER': 'postgres',    # or the RDS username you chose
-        'PASSWORD': 'CvXx4kifd3AvSK2iR4P8',
+        'PASSWORD': 'Rds_2025',
         'HOST': 'thebeatlesdb.cidgcy8um3y9.us-east-1.rds.amazonaws.com',
         'PORT': '5432',
-    }
+    }  
 }
 
 # db_from_env = dj_database_url.config(conn_max_age=600)
