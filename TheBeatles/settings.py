@@ -90,7 +90,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'thebeatlesdb',  # your RDS db name
         'USER': 'postgres',    # or the RDS username you chose
-        'PASSWORD': '30ydxH6mzArOLiXONnKV',
+        'PASSWORD': 'CvXx4kifd3AvSK2iR4P8',
         'HOST': 'thebeatlesdb.cidgcy8um3y9.us-east-1.rds.amazonaws.com',
         'PORT': '5432',
     }
