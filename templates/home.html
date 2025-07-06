@@ -70,7 +70,9 @@
     var isLoggedIn = {% if user.is_authenticated %}true{% else %}false{% endif %};
 </script>
 
-<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCIcFnVUowxRlXchoRiI1nQKy_hsw461c4&callback=console.debug&libraries=maps,marker&v=beta"></script>
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCIcFnVUowxRlXchoRiI1nQKy_hsw461c4&callback=initMap&libraries=places&v=weekly">
+</script>
 <script>
         var map, directionsService, directionsRenderer, currwentLocation, currentRouteSteps;
         var isCurrentLocationAvailable = false;
